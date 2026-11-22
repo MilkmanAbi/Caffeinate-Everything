@@ -1,6 +1,6 @@
-# caffeinate for Windows
+﻿# caffeinate for Windows
 
-The macOS `caffeinate` command, for Windows. Same flags, same behaviour, single native `.exe`
+The macOS `caffeinate` command, for Windows. Same flags and syntax, single native `.exe`
 (no runtime needed). Works from PowerShell, cmd and Git Bash.
 
 ```
