@@ -29,6 +29,7 @@ With nothing else, caffeinate runs until interrupted (Ctrl+C).";
 
     private static readonly ManualResetEvent Quit = new(false);
     private static volatile bool _runningUtility;
+    private static int _interrupts;
 
     private static int Main(string[] args)
     {
@@ -151,9 +152,15 @@ With nothing else, caffeinate runs until interrupted (Ctrl+C).";
 
         Console.CancelKeyPress += (_, e) =>
         {
-            // With a utility, the child receives Ctrl+C too: keep holding until it actually exits.
+            // With a utility, the child receives Ctrl+C too, so keep holding while it shuts down.
+            // A second Ctrl+C (or Ctrl+Break) stops caffeinate anyway, for utilities that ignore it.
             e.Cancel = true;
-            if (!_runningUtility) Quit.Set();
+            if (!_runningUtility
+                || e.SpecialKey == ConsoleSpecialKey.ControlBreak
+                || Interlocked.Increment(ref _interrupts) >= 2)
+            {
+                Quit.Set();
+            }
         };
 
         try
@@ -242,6 +249,17 @@ With nothing else, caffeinate runs until interrupted (Ctrl+C).";
         _runningUtility = true;
         using var proc = System.Diagnostics.Process.Start(psi)
                          ?? throw new InvalidOperationException($"failed to start {name}");
+        using var exited = new ManualResetEvent(false)
+        {
+            SafeWaitHandle = new SafeWaitHandle(proc.Handle, ownsHandle: false),
+        };
+        if (WaitHandle.WaitAny([exited, Quit]) == 1)
+        {
+            // Forced stop: leave the utility alone (it may be the user's app) but stop holding.
+            Console.Error.WriteLine(
+                $"caffeinate: interrupted; {name} (pid {proc.Id}) is still running but no longer kept awake");
+            return 130;
+        }
         proc.WaitForExit();
         return proc.ExitCode;
     }

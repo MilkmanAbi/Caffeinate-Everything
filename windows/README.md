@@ -36,8 +36,22 @@ With no assertion flag, `-i` is assumed. With no utility, `-t` or `-w`, caffeina
 
 Utilities are looked up through `PATH` + `PATHEXT` the way a shell does. `.cmd`/`.bat` files such as
 `npm` or `code` are run through `cmd.exe`. The utility's exit code is passed through, and a missing
-command returns 127. Ctrl+C while a utility runs goes to the utility, and caffeinate keeps holding
-until the utility actually exits.
+command returns 127.
+
+### Stopping it
+
+| What you do | What happens |
+|-------------|--------------|
+| Ctrl+C (no utility) | Exits immediately with code 130. |
+| Ctrl+C (utility running) | The utility gets the Ctrl+C too. caffeinate keeps holding while it shuts down, then exits with its code. |
+| Ctrl+C a second time | caffeinate stops right away (130) even if the utility ignores Ctrl+C, such as a GUI app or a `.bat` waiting at "Terminate batch job?". The utility is left running. |
+| Ctrl+Break | Exits immediately. |
+| Close the terminal window or tab | Exits immediately, along with any console utility it started. |
+| Process killed (Task Manager, `Stop-Process`) | Windows drops the power requests with the process. |
+
+If you start it as a background job with cmd's `start /b caffeinate -d`, Ctrl+C is ignored, just as
+`caffeinate &` on macOS isn't killed by Ctrl+C. Stop it with Ctrl+Break, by closing the window, or
+with `taskkill /im caffeinate.exe`.
 
 Additions not in macOS: `-h` / `--help`.
 
@@ -61,6 +75,25 @@ powercfg /requests
 
 The entries show up under `DISPLAY:` / `SYSTEM:` as `[PROCESS] ...\caffeinate.exe` with the reason
 `caffeinate command-line tool`.
+
+## Tests
+
+```powershell
+.\tests\run-tests.ps1                                # tests .\publish\caffeinate.exe
+.\tests\run-tests.ps1 -Exe publish\x64\caffeinate.exe
+```
+
+These are end-to-end tests. A small harness (`tests/harness.cs`, compiled with the C# compiler built
+into Windows) launches caffeinate in real hidden consoles and sends it real Ctrl+C, Ctrl+Break and
+window-close signals. The suite covers:
+- background jobs (`start /b`)
+- no console at all (GUI launchers, scheduled tasks)
+- pipes and redirection, and cmd.exe
+- `.cmd` resolution
+- Git Bash and WSL interop (skipped if not installed)
+
+Run it elevated to also check `powercfg /requests`, including that the requests are released when
+the process is killed.
 
 ## Build / install
 
