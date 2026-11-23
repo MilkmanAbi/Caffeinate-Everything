@@ -58,8 +58,23 @@ internal static class Cli
     // Same one-line usage as macOS caffeinate (plus -m, which macOS also accepts).
     public const string Usage = "usage: caffeinate [-dimsu] [-t timeout] [-w pid] [utility arguments...]";
 
-    // macOS-style: the usage line on top, then the Windows extensions further down.
-    public static readonly string Help = Usage + new string('\n', 16) + """
+    // The macOS flags first (usage + what each does), then the Windows extensions further down.
+    private const string MacFlags = """
+
+          -d          Prevent the display from sleeping.
+          -i          Prevent the system from idle sleeping (default if no assertion flag is given).
+          -m          Prevent the disk from idle sleeping (Windows: same as -i).
+          -s          Prevent the system from sleeping. Only held while on AC power.
+          -u          Declare that the user is active: wakes the display and keeps it on
+                      for the -t timeout, or 5 seconds if no timeout is given.
+          -t timeout  Hold the assertions for <timeout> seconds. Ignored when a utility is given.
+          -w pid      Hold the assertions until process <pid> exits.
+
+        With a utility, the assertions are held until it exits, and caffeinate exits with its code.
+        With nothing else, caffeinate runs until interrupted (Ctrl+C).
+        """;
+
+    public static readonly string Help = Usage + "\n" + MacFlags + new string('\n', 12) + """
         Extended options (caffeinate for Windows)
 
           Holding

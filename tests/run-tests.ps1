@@ -187,7 +187,9 @@ function SettingsBack { ($orig.Keys | Where-Object { (Setting $_) -ne $orig[$_] 
 Write-Host "`n-- Extended: help and validation --"
 $hl = @(& $Exe --help)
 Check '--help: macOS usage line first' ($hl[0] -like 'usage: caffeinate `[-dimsu`]*') $hl[0]
-Check '--help: extended options below a gap' ((@($hl[1..10] | Where-Object { $_.Trim() }).Count -eq 0) -and (($hl -join "`n") -match 'Extended options'))
+$hj = $hl -join "`n"
+Check '--help: then the macOS flag descriptions' (($hj -match '(?m)^  -d +Prevent the display from sleeping') -and ($hj -match '(?m)^  -w pid +Hold the assertions until process'))
+Check '--help: extended options after a gap of blank lines' ($hj -match 'runs until interrupted \(Ctrl\+C\)\.\n{8,}Extended options')
 $cases = @(
     @{ a = @('--screen-off', '-d'); m = 'contradicts' },
     @{ a = @('--for', '2h', '-t', '5'); m = 'only one of' },

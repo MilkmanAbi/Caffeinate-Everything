@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- `caffeinate --help` shows the macOS flag descriptions (`-d -i -m -s -u -t -w`) under the usage line
+  again, with the Windows extended options further down.
+
 ## 1.2.0
 
 - **Updates:**
