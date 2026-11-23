@@ -70,7 +70,10 @@ internal static class PowerActions
         using var req = new PowerRequest("caffeinate scheduled wake");
         req.Set(Native.PowerRequestType.DisplayRequired);
         req.Set(Native.PowerRequestType.SystemRequired);
+        Log.Write($"wake: display state before {MessageWindow.DisplayState}");
         DeclareUserActivity();
+        Thread.Sleep(1500);
+        Log.Write($"wake: display state after {MessageWindow.DisplayState} (0 off, 1 on, 2 dimmed)");
         var until = DateTime.UtcNow + hold;
         while (DateTime.UtcNow < until)
         {

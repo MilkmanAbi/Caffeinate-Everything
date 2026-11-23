@@ -146,6 +146,10 @@ internal static class Schedules
             }
         }
 
+        if (o.HoldUpdates)
+            throw new UsageException("--hold-updates can't be part of a saved schedule (nobody would be there to " +
+                                     "answer the admin prompt); use caffeinate --pause-updates instead");
+
         // ---- build events ----
         string desc;
         if (o.SleepWindow is TimeWindow sw)

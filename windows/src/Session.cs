@@ -85,7 +85,8 @@ internal sealed class Holds(Options o) : IDisposable
 
             // Modern Standby on battery terminates system requests 5 minutes after the sleep timeout
             // (PowerSetRequest docs). With the battery sleep timeout at "never" that point never comes.
-            if (System && PowerActions.ModernStandby)
+            // Not needed with -d (the display stays on, so the PC can't enter standby) unless the lid may close.
+            if (System && PowerActions.ModernStandby && (!Display || o.IgnoreLid))
                 _dcSleep = TryJournal(PlanSetting.SleepTimeout, null, 0);
 
             // Closing the lid is a user-initiated sleep that ends all requests, unless its action is "do nothing".
@@ -220,8 +221,15 @@ internal static class Session
 
             if (o.HoldUpdates)
             {
-                var helper = Updates.StartSessionHold(end);
-                Cleanups.Add(helper.Dispose);
+                try
+                {
+                    var helper = Updates.StartSessionHold(end);
+                    Cleanups.Add(helper.Dispose);
+                }
+                catch (Exception e) when (Quiet)
+                {
+                    Log.Write($"--hold-updates skipped: {e.Message}");   // keep holding anyway
+                }
             }
 
             if (o.U)

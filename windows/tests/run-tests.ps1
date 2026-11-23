@@ -197,7 +197,8 @@ $cases = @(
     @{ a = @('--sleep', 'now-07:00', '--repeat', 'daily'); m = 'clock times' },
     @{ a = @('--battery-floor', '150'); m = 'battery floor' },
     @{ a = @('--sleep', '23:00-07:00', '-d'); m = 'only apply to --wake' },
-    @{ a = @('--bogus'); m = 'unrecognized option' }
+    @{ a = @('--bogus'); m = 'unrecognized option' },
+    @{ a = @('--wake', '09:00-17:30', '--repeat', 'daily', '--hold-updates'); m = "can't be part of a saved schedule" }
 )
 foreach ($case in $cases) {
     $out = (& $Exe @($case.a) 2>&1) -join ' '
@@ -233,9 +234,14 @@ $p = Start-Process -PassThru -WindowStyle Hidden $Exe -ArgumentList '--ignore-li
 Start-Sleep 2
 Check '--ignore-lid: lid close is "do nothing" while holding' ((Setting lid) -eq '0/0') (Setting lid)
 if ($modern) { Check 'Modern Standby: battery sleep timeout is Never while holding' ((Setting sleep) -like '*/0') (Setting sleep) }
+
 Check '--status lists the session and the temporary changes' (((& $Exe --status) -join ' ') -match "pid $($p.Id).*Temporarily changed")
 $p.WaitForExit()
 Check '...restored after a normal exit' (SettingsBack) "lid=$(Setting lid) sleep=$(Setting sleep)"
+$p = Start-Process -PassThru -WindowStyle Hidden $Exe -ArgumentList '-dismu', '-t', '3'
+Start-Sleep 1.5
+Check 'plain -dismu changes no power-plan setting, like on macOS' ((SettingsBack) -and -not (TaskExists 'repair')) "sleep=$(Setting sleep)"
+$p.WaitForExit()
 $r = Harness console ctrlc 2500 6000 $Exe --ignore-lid
 Check '...restored after Ctrl+C' (((Code $r) -eq 130) -and (SettingsBack)) "$r lid=$(Setting lid)"
 $r = Harness console close 2500 8000 $Exe --ignore-lid
