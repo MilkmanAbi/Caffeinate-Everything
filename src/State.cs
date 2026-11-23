@@ -58,6 +58,7 @@ internal sealed class SessionInfo
 [JsonSerializable(typeof(SessionInfo))]
 [JsonSerializable(typeof(Schedule))]
 [JsonSerializable(typeof(WakeTimerState))]
+[JsonSerializable(typeof(UpdateState))]
 internal sealed partial class StateJson : JsonSerializerContext;
 
 internal static class State

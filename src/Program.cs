@@ -22,12 +22,23 @@ internal static class Program
             return 1;
         }
 
+        Updater.CleanupOld();
+        if (o.Command is Command.Status or Command.List or Command.Version
+            || (o.Command == Command.Hold && o.Utility.Length == 0))
+            Updater.MaybeNotify();
+
         try
         {
             switch (o.Command)
             {
                 case Command.Help: Console.WriteLine(Cli.Help); return 0;
-                case Command.Version: Console.WriteLine($"caffeinate {Version} (Windows)"); return 0;
+                case Command.Version:
+                    Console.WriteLine($"caffeinate {VersionText} (Windows, {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()})");
+                    return 0;
+                case Command.CheckUpdate: return Updater.CheckCommand();
+                case Command.Update: return Updater.UpdateCommand();
+                case Command.UpdateCheck: return Updater.SetCheck(o.Target!);
+                case Command.PostInstall: return Background(Updater.PostInstall);
                 case Command.Status: return Status.Show();
                 case Command.List: return Schedules.List();
                 case Command.Remove: return Schedules.RemoveCommand(o.Target!);
@@ -54,9 +65,9 @@ internal static class Program
         }
     }
 
-    private static string Version =>
+    public static string VersionText { get; } =
         typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            .Split('+')[0] ?? "?";
+            .Split('+')[0] ?? "0.0.0";
 
     private static int Restore()
     {

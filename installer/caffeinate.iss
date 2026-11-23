@@ -1,6 +1,7 @@
-; Inno Setup script for caffeinate (Windows). Built by build.ps1 -Installer, once per architecture:
-;   ISCC.exe /DArch=x64   /DAppVersion=1.1.0 caffeinate.iss
-;   ISCC.exe /DArch=arm64 /DAppVersion=1.1.0 caffeinate.iss
+; Inno Setup script for caffeinate (Windows). Built by build.ps1 -Installer, once per architecture
+; (the version comes from caffeinate.csproj):
+;   ISCC.exe /DArch=x64   /DAppVersion=1.2.0 caffeinate.iss
+;   ISCC.exe /DArch=arm64 /DAppVersion=1.2.0 caffeinate.iss
 ;
 ; Installs per user by default (no admin), like caffeinate itself; "all users" is offered on the first page.
 ; The uninstaller removes schedules, restores any settings caffeinate changed, and deletes its data.
@@ -50,10 +51,19 @@ VersionInfoDescription=caffeinate for Windows setup ({#Arch})
 
 [Tasks]
 Name: "addtopath"; Description: "Add caffeinate to &PATH (so it runs from any terminal)"
+Name: "updatecheck"; Description: "Tell me when a new &version is out (checks GitHub once a day)"
 
 [Files]
 Source: "..\publish\win-{#Arch}\caffeinate.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
+
+[Run]
+; Refresh the windowless agent used by saved schedules, and set the update-check preference.
+Filename: "{app}\caffeinate.exe"; Parameters: "--post-install"; Flags: runhidden waituntilterminated runasoriginaluser
+Filename: "{app}\caffeinate.exe"; Parameters: "--update-check on"; Tasks: updatecheck; Flags: runhidden waituntilterminated runasoriginaluser
+Filename: "{app}\caffeinate.exe"; Parameters: "--update-check off"; Tasks: not updatecheck; Flags: runhidden waituntilterminated runasoriginaluser
 
 [UninstallRun]
 ; Remove saved schedules (and their scheduled tasks), put back any setting a killed caffeinate left
@@ -66,7 +76,7 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/f /im caffeinate-agent.exe"; Flags
 Type: filesandordirs; Name: "{localappdata}\Caffeinate"
 
 [Messages]
-FinishedLabel=caffeinate is installed.%n%nOpen a NEW terminal window and run:%n%n    caffeinate -dismu%n    caffeinate --help
+FinishedLabel=caffeinate is installed.%n%nOpen a NEW terminal window and run:%n%n    caffeinate -dismu%n    caffeinate --help%n%nTo update later: caffeinate --update
 
 [Code]
 const

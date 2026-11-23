@@ -291,6 +291,66 @@ do { Start-Sleep 5 } until (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Caffei
 Check '...and the finished one-off removed itself, tasks and all' ((-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Caffeinate\schedules\caff-test-b.json'))) -and (-not (TaskExists 'caff-test-b.wake')))
 Check '...and put "Allow wake timers" back' ((Setting wake) -eq $orig.wake) (Setting wake)
 
+Write-Host "`n-- Updates (against a local stand-in for the GitHub API) --"
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+$work = Join-Path $env:TEMP ("caff-upd-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+New-Item -ItemType Directory $work | Out-Null
+# The "new" exe: a copy of this one with a marker appended (PE files run fine with trailing data).
+$marker = [Text.Encoding]::ASCII.GetBytes('CAFFEINATE-UPDATE-TEST')
+$newExe = Join-Path $work 'new.exe'
+[IO.File]::WriteAllBytes($newExe, [IO.File]::ReadAllBytes($Exe) + $marker)
+$port = Get-Random -Minimum 20000 -Maximum 40000
+$server = Start-Job -ArgumentList $port, $newExe, $arch -ScriptBlock {
+    param($port, $newExe, $arch)
+    $l = New-Object System.Net.HttpListener; $l.Prefixes.Add("http://localhost:$port/"); $l.Start()
+    $bytes = [IO.File]::ReadAllBytes($newExe)
+    $sha = ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes)) -replace '-', '').ToLower()
+    $name = "caffeinate-windows-$arch.exe"
+    while ($l.IsListening) {
+        $ctx = $l.GetContext(); $path = $ctx.Request.Url.AbsolutePath; $resp = $ctx.Response
+        $mode = $path.Split('/')[1]   # /good/..., /bad/..., /same/...
+        if ($path -like '*/releases/latest') {
+            $tag = if ($mode -eq 'same') { 'v0.0.1' } else { 'v9.9.9' }
+            $json = "{`"tag_name`":`"$tag`",`"html_url`":`"http://localhost:$port/page`",`"assets`":[" +
+                    "{`"name`":`"$name`",`"browser_download_url`":`"http://localhost:$port/$mode/dl/exe`"}," +
+                    "{`"name`":`"SHA256SUMS.txt`",`"browser_download_url`":`"http://localhost:$port/$mode/dl/sums`"}]}"
+            $out = [Text.Encoding]::UTF8.GetBytes($json)
+        } elseif ($path -like '*/dl/exe') { $out = $bytes }
+        elseif ($path -like '*/dl/sums') {
+            $h = if ($mode -eq 'bad') { '0' * 64 } else { $sha }
+            $out = [Text.Encoding]::ASCII.GetBytes("$h  $name`n")
+        } else { $resp.StatusCode = 404; $out = [byte[]]@() }
+        $resp.OutputStream.Write($out, 0, $out.Length); $resp.Close()
+    }
+}
+Start-Sleep 2
+$portable = Join-Path $work 'caffeinate.exe'
+Copy-Item $Exe $portable
+function Upd([string]$mode, [string[]]$a) {
+    $env:CAFFEINATE_UPDATE_API = "http://localhost:$port/$mode"; $env:CAFFEINATE_PRETEND_VERSION = '1.0.0'
+    try { (& $portable @a 2>&1) -join ' ' } finally { Remove-Item Env:CAFFEINATE_UPDATE_API, Env:CAFFEINATE_PRETEND_VERSION -ErrorAction SilentlyContinue }
+}
+if ($server.State -ne 'Running') {
+    Write-Host "(skipping update tests: the local test server could not start: $((Receive-Job $server 2>&1) -join ' '))" -ForegroundColor DarkGray
+} else {
+    $o = Upd 'good' @('--check-update')
+    Check '--check-update sees a newer release' ($o -match 'caffeinate 9\.9\.9 is available \(you have 1\.0\.0\)') $o
+    $o = Upd 'same' @('--check-update')
+    Check '--check-update: older or equal release means up to date' ($o -match 'is up to date') $o
+    $before = (Get-FileHash $portable).Hash
+    $o = Upd 'bad' @('--update')
+    Check '--update refuses a download whose checksum does not match' (($LASTEXITCODE -eq 1) -and $o -match 'checksum mismatch') $o
+    Check '...and leaves the existing exe untouched' ((Get-FileHash $portable).Hash -eq $before)
+    $o = Upd 'good' @('--update')
+    $tail = [IO.File]::ReadAllBytes($portable) | Select-Object -Last $marker.Length
+    Check "standalone --update downloads the $arch build and replaces itself" (($LASTEXITCODE -eq 0) -and $o -match "\($arch, standalone exe\)" -and ([Text.Encoding]::ASCII.GetString([byte[]]$tail) -eq 'CAFFEINATE-UPDATE-TEST')) $o
+    Check '...keeping the previous copy aside while it was running' (Test-Path "$portable.old")
+    $o = (& $portable --version) -join ' '
+    Check '...the updated exe runs, and cleans up the old copy' (($o -match 'caffeinate') -and -not (Test-Path "$portable.old")) $o
+}
+Stop-Job $server -ErrorAction SilentlyContinue; Remove-Job $server -Force -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+
 foreach ($n in 'caff-test-a', 'caff-test-b') { & $Exe --remove $n 2>$null | Out-Null }
 & $Exe --restore | Out-Null
 Check 'all power settings are exactly as they were before the tests' (SettingsBack) (($orig.Keys | ForEach-Object { "$_=$(Setting $_) (was $($orig[$_]))" }) -join ', ')

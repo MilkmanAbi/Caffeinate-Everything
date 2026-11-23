@@ -1,0 +1,66 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: win-arm64
+            os: windows-11-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Invoke-WebRequest https://jrsoftware.org/download.php/is.exe -OutFile "$env:RUNNER_TEMP\is.exe"
+            Start-Process "$env:RUNNER_TEMP\is.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+          }
+          if (-not (Test-Path $iscc)) { throw 'Inno Setup is not available' }
+
+      - name: Build exe and installer
+        shell: pwsh
+        run: ./build.ps1 -Rid ${{ matrix.rid }} -Installer
+
+      - name: Smoke test (native)
+        shell: pwsh
+        env:
+          CAFFEINATE_NO_UPDATE_CHECK: '1'
+        run: |
+          $c = "publish/${{ matrix.rid }}/caffeinate.exe"
+          & $c --version
+          if ($LASTEXITCODE) { throw '--version failed' }
+          if ((& $c --help)[0] -notlike 'usage: caffeinate*') { throw '--help is not macOS-style' }
+          & $c -x 2>$null
+          if ($LASTEXITCODE -ne 1) { throw 'an illegal option must exit 1' }
+          & $c -i cmd /c exit 7
+          if ($LASTEXITCODE -ne 7) { throw 'utility exit code not passed through' }
+          & $c -t 1
+          if ($LASTEXITCODE) { throw '-t 1 failed' }
+          $env:CAFFEINATE_NOW = '2026-11-23T12:00:00'; $env:CAFFEINATE_TZ = 'Pacific Standard Time'
+          $o = (& $c --sleep 23:00-07:00 --dry-run) -join "`n"
+          if ($o -notmatch 'wake\s+tomorrow 07:00') { throw "schedule maths: $o" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: caffeinate-${{ matrix.rid }}
+          path: |
+            publish/${{ matrix.rid }}/caffeinate.exe
+            publish/installers/*.exe
+          if-no-files-found: error

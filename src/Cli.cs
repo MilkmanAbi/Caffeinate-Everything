@@ -10,7 +10,8 @@ internal enum Command
 {
     Hold, Schedule, List, Remove, PauseUpdates, ResumeUpdates, Status, Restore, Version, Help,
     // internal, used by scheduled tasks and the elevated helper
-    RunSchedule, Repair, Elevated,
+    CheckUpdate, Update, UpdateCheck,
+    RunSchedule, Repair, Elevated, PostInstall,
 }
 
 internal enum ActionKind { Sleep, Hibernate, Wake, ScreenOff }
@@ -92,13 +93,18 @@ internal static class Cli
             --resume-updates      resume Windows Update [admin]
             --restore             undo settings left changed by a caffeinate that was killed
             --version             print the version
+
+          Updates
+            --check-update        see whether a newer caffeinate is out
+            --update              download (verified) and install the newest caffeinate
+            --update-check on|off once-a-day check that prints a one-line notice (default on)
         """;
     private static readonly string[] LongWithValue =
-        ["for", "until", "battery-floor", "sleep", "wake", "at", "repeat", "name", "remove", "pause-updates"];
+        ["for", "until", "battery-floor", "sleep", "wake", "at", "repeat", "name", "remove", "pause-updates", "update-check"];
 
     private static readonly string[] LongFlags =
         ["screen-off", "ignore-lid", "hold-updates", "dry-run", "status", "list", "resume-updates", "restore",
-         "version", "help"];
+         "version", "help", "check-update", "update"];
 
     public static Options Parse(string[] args)
     {
@@ -112,6 +118,7 @@ internal static class Cli
                 case "--run-schedule": o.Command = Command.RunSchedule; o.Internal = args[1..]; return o;
                 case "--repair": o.Command = Command.Repair; o.Internal = args[1..]; return o;
                 case "--elevated": o.Command = Command.Elevated; o.Internal = args[1..]; return o;
+                case "--post-install": o.Command = Command.PostInstall; return o;
             }
         }
 
@@ -188,7 +195,7 @@ internal static class Cli
         o.Utility = args[i..];
 
         if (commands.Distinct().Count() > 1)
-            throw new UsageException("give only one of --status, --list, --remove, --pause-updates, --resume-updates, --restore, --version");
+            throw new UsageException("give only one command (--status, --list, --remove, --update, ...)");
         if (commands.Count > 0) o.Command = commands[0];
         else if (o.HasSchedule) o.Command = Command.Schedule;
 
@@ -233,6 +240,9 @@ internal static class Cli
                 case "resume-updates": commands.Add(Command.ResumeUpdates); break;
                 case "restore": commands.Add(Command.Restore); break;
                 case "version": commands.Add(Command.Version); break;
+                case "check-update": commands.Add(Command.CheckUpdate); break;
+                case "update": commands.Add(Command.Update); break;
+                case "update-check": commands.Add(Command.UpdateCheck); o.Target = value; break;
                 case "help": commands.Add(Command.Help); break;
             }
         }
