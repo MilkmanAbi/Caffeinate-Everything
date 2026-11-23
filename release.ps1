@@ -11,23 +11,28 @@ param(
     [switch]$SkipTests,
     [string]$Repo = 'MilkmanAbi/Caffeinate-Everything'
 )
-$ErrorActionPreference = 'Stop'
+# Native tools (git, gh, dotnet) write progress to stderr, which Windows PowerShell 5.1 turns into terminating
+# errors under 'Stop' when output is redirected. So: 'Continue', and every native call checks $LASTEXITCODE.
+$ErrorActionPreference = 'Continue'
 Set-Location $PSScriptRoot
 
 $version = ([xml](Get-Content caffeinate.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 $tag = "v$version"
 Write-Host "Releasing caffeinate $version ($tag)" -ForegroundColor Cyan
 
-if (git status --porcelain) { throw 'The working tree has uncommitted changes; commit them first.' }
+if ((git status --porcelain) -or $LASTEXITCODE) { throw 'The working tree has uncommitted changes; commit them first.' }
 if (git tag --list $tag) { throw "Tag $tag already exists; bump <Version> in caffeinate.csproj." }
-gh release view $tag --repo $Repo *> $null
+gh release view $tag --repo $Repo 2>&1 | Out-Null
 if ($LASTEXITCODE -eq 0) { throw "GitHub release $tag already exists." }
 
 $changelog = [IO.File]::ReadAllText((Resolve-Path CHANGELOG.md)) -replace "`r`n", "`n"
 $section = [regex]::Match($changelog, "(?ms)^## $([regex]::Escape($version))[^\n]*\n(.*?)(?=^## |\z)")
 if (-not $section.Success) { throw "CHANGELOG.md has no '## $version' section." }
 
-foreach ($rid in 'win-x64', 'win-arm64') { & .\build.ps1 -Rid $rid -Installer }
+foreach ($rid in 'win-x64', 'win-arm64') {
+    & .\build.ps1 -Rid $rid -Installer
+    if (-not $?) { throw "build failed for $rid" }
+}
 
 if (-not $SkipTests) {
     # Native architecture first; on ARM64 the x64 build also runs (emulated), so test both there.
@@ -66,11 +71,12 @@ settings and schedules. The binaries aren't code-signed, so Windows may ask befo
 first time. Checksums are in ``SHA256SUMS.txt``.
 "@ | Set-Content -Encoding utf8 $notes
 
-git push origin HEAD
+git push origin HEAD 2>&1 | Write-Host
+if ($LASTEXITCODE -ne 0) { throw 'git push failed' }
 $ghArgs = @('release', 'create', $tag, '--repo', $Repo, '--target', (git rev-parse HEAD), '--title', "caffeinate $version",
           '--notes-file', $notes) + $assets.FullName + (Join-Path $out 'SHA256SUMS.txt')
 if ($Draft) { $ghArgs += '--draft' }
 & gh @ghArgs
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
-git fetch --tags --quiet
+git fetch --tags --quiet 2>&1 | Out-Null
 Write-Host "Released $tag" -ForegroundColor Green

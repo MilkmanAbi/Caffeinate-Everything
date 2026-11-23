@@ -9,7 +9,9 @@ param(
     [switch]$Install,
     [string]$InstallDir = (Join-Path $HOME '.local\bin')
 )
-$ErrorActionPreference = 'Stop'
+# Native tools (git, gh, dotnet) write progress to stderr, which Windows PowerShell 5.1 turns into terminating
+# errors under 'Stop' when output is redirected. So: 'Continue', and every native call checks $LASTEXITCODE.
+$ErrorActionPreference = 'Continue'
 Set-Location $PSScriptRoot
 
 # The Native AOT linker locates MSVC via vswhere.exe, which the VS installer doesn't put on PATH.
