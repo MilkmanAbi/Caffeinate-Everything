@@ -14,12 +14,12 @@ Set-Location $PSScriptRoot
 $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
 if (Test-Path (Join-Path $installer 'vswhere.exe')) { $env:PATH = "$installer;$env:PATH" }
 
-dotnet publish -c Release -r $Rid -o publish --nologo
+dotnet publish -c Release -r $Rid -o "publish\$Rid" --nologo
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed ($LASTEXITCODE)" }
 
 if ($Install) {
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
-    Copy-Item publish\caffeinate.exe (Join-Path $InstallDir 'caffeinate.exe') -Force
+    Copy-Item "publish\$Rid\caffeinate.exe" (Join-Path $InstallDir 'caffeinate.exe') -Force
     Write-Host "Installed to $InstallDir\caffeinate.exe"
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
     if ($userPath -notcontains $InstallDir) {

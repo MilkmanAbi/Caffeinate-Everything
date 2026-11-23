@@ -53,17 +53,71 @@ If you start it as a background job with cmd's `start /b caffeinate -d`, Ctrl+C 
 `caffeinate &` on macOS isn't killed by Ctrl+C. Stop it with Ctrl+Break, by closing the window, or
 with `taskkill /im caffeinate.exe`.
 
-Additions not in macOS: `-h` / `--help`.
+`caffeinate --help` prints the macOS usage line; the Windows extensions are listed further down.
+
+## Extended features (Windows only)
+
+All of these are long options, so they never clash with the macOS flags. Everything runs as you.
+The only exception is Windows Update pausing, which shows one UAC prompt.
+
+```powershell
+caffeinate --for 2h30m                       # hold for a duration
+caffeinate -d --until 18:30                  # hold until a time
+caffeinate --screen-off                      # screen off now, PC keeps running (Wi-Fi, downloads...)
+caffeinate --ignore-lid -i python train.py   # keep training with the lid closed
+caffeinate --battery-floor 20 -i make        # stop holding if the battery drops to 20%
+caffeinate --hold-updates -i ./long-job.cmd  # no Windows Update restart in the middle (UAC once)
+
+caffeinate --sleep 23:00-07:00 --repeat weekdays   # asleep at night, woken in the morning
+caffeinate -d --wake 09:00-17:30 --repeat weekdays # awake (display on) in work hours, then sleep
+caffeinate --wake 3h                               # stay awake 3 hours here, then sleep
+caffeinate --sleep 2h                              # sleep now, wake in 2 hours
+caffeinate --at "23:30 sleep" --at "06:45 wake" --repeat daily
+caffeinate --list ; caffeinate --remove all ; caffeinate --status
+caffeinate --pause-updates 7d ; caffeinate --resume-updates
+```
+
+Time formats: `90s 45m 2h 1h30m 1d`, `18:30 7am 7:30pm noon midnight`, `tomorrow 07:00`,
+`2026-12-01 09:00`, `+2h`, `now`. A window is `START-END`, `"START to END"`, `START+DURATION`, or
+just `DURATION`, which starts now. An end earlier than its start crosses midnight. `--dry-run`
+prints the plan without doing anything.
+
+### How it works, and why
+
+| Feature | Implementation | Why this way |
+|---------|----------------|--------------|
+| `--screen-off` | Sets the screen timeout to 3 s, waits for the screen to go dark, then restores the timeout. The screen stays off until there's input. | Microsoft: after the *screen* timeout "the system continues to run and all applications continue to operate normally". The usual monitor-off message (`SC_MONITORPOWER`) instead sends a Modern Standby PC to sleep, cutting Wi-Fi (verified on a Surface Laptop). |
+| Holding on battery (Modern Standby) | While caffeinate keeps the system awake, the *battery* sleep timeout is set to "never", then put back. | `PowerSetRequest` docs: on Modern Standby on DC power, requests "are terminated 5 minutes after the system sleep timeout has expired". |
+| `--ignore-lid` | Lid close action is set to "do nothing" while holding, then put back. | Closing the lid is a user-initiated sleep, which ends all power requests. |
+| `--sleep`, `--at ... sleep` | Modern Standby: the monitor-off message (enters standby). Older PCs: `SetSuspendState`. | `SetSuspendState(sleep)` isn't supported on Modern Standby PCs. |
+| `--sleep` followed by a wake | On Modern Standby PCs this **hibernates** instead. | A timer "wakes SoC but cannot turn on display" from Modern Standby (Microsoft). Resuming from hibernate on a timer is a full wake. |
+| Saved schedules | Per-user Task Scheduler tasks in `\Caffeinate\` (no admin), run by a windowless copy of caffeinate. They catch up after missed runs and re-enter a wake window after restart, sign-in or unlock. | Survives closing the terminal, restarts and sleep. |
+| Wake events | Holds the display and system on for 2 minutes after a timer wake. Turns on "Allow wake timers" while a wake schedule exists, and puts it back afterwards. | Windows sends a PC back to sleep ~2 minutes after an unattended timer wake. |
+| Scheduled sleeps | Wait until there has been 2 minutes with no input (up to 15 minutes), and skip if another caffeinate is holding or the event is more than 10 minutes late. | A schedule shouldn't put the PC to sleep while you're using it. |
+| Windows Update | The same registry values the Settings app writes, set by a short-lived elevated helper. `--hold-updates` restores the previous state the moment caffeinate exits, never shortens a pause you set, and expires on its own if everything is killed. | One UAC prompt; everything else stays unprivileged. |
+
+### Nothing gets left behind
+
+Every power-plan change is recorded in `%LOCALAPPDATA%\Caffeinate\journal.json` with the original
+value and the process that made it. It is put back:
+- on normal exit, Ctrl+C, closing the window, or logoff/shutdown
+- if caffeinate is killed: by a repair task that runs every 5 minutes and at logon while anything is
+  changed, or by `caffeinate --restore`
+- never over a value *you* changed in the meantime
+
+When several caffeinates change the same setting, the last one out restores it. `--status` shows
+everything that's currently changed.
 
 ## Windows caveats
 
-- **Modern Standby (S0 Low Power Idle) laptops**, which includes most ARM64 machines: turning the
-  display off moves the machine toward standby. To truly keep the machine up, include `-d`.
-  `-dismu` already does.
-- As on macOS, none of these stop sleep when you **close the lid** or **press the power button**.
-  That is controlled by your power plan's lid/button actions.
-- Assertions are tied to the process. If caffeinate is killed, Windows drops them immediately, so
-  nothing gets stuck on.
+- **Modern Standby (S0 Low Power Idle)**, which covers most modern laptops and all ARM64 ones:
+  - A scheduled wake only works fully if the PC is awake, hibernated, or was put to sleep by a
+    caffeinate `--sleep` schedule, since caffeinate hibernates for those.
+  - Timer wakes from hibernate are reported to work reliably on AC power only.
+- Without `--ignore-lid`, closing the lid sleeps the PC as usual, just like on macOS.
+- Scheduled tasks run only while you're signed in. That's what lets them run without admin rights
+  or a stored password.
+- Power requests are tied to the process. If caffeinate is killed, Windows drops them immediately.
 
 ## Verify it's working
 
@@ -79,8 +133,8 @@ The entries show up under `DISPLAY:` / `SYSTEM:` as `[PROCESS] ...\caffeinate.ex
 ## Tests
 
 ```powershell
-.\tests\run-tests.ps1                                # tests .\publish\caffeinate.exe
-.\tests\run-tests.ps1 -Exe publish\x64\caffeinate.exe
+.\tests\run-tests.ps1                                       # tests .\publish\<arch>\caffeinate.exe
+.\tests\run-tests.ps1 -Exe publish\win-x64\caffeinate.exe
 ```
 
 These are end-to-end tests. A small harness (`tests/harness.cs`, compiled with the C# compiler built
@@ -91,6 +145,14 @@ window-close signals. The suite covers:
 - pipes and redirection, and cmd.exe
 - `.cmd` resolution
 - Git Bash and WSL interop (skipped if not installed)
+- the extended options:
+  - validation and schedule maths with a pinned clock and time zone, including DST and midnight
+    crossing
+  - settings being restored after a normal exit, Ctrl+C, window close and a hard kill
+  - schedules being registered and removed
+  - a real Task Scheduler wake firing the windowless agent
+
+None of the tests sleep the PC or turn the screen off.
 
 Run it elevated to also check `powercfg /requests`, including that the requests are released when
 the process is killed.
