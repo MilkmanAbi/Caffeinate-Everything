@@ -247,15 +247,24 @@ Check '...restored after Ctrl+C' (((Code $r) -eq 130) -and (SettingsBack)) "$r l
 $r = Harness console close 2500 8000 $Exe --ignore-lid
 Start-Sleep -Milliseconds 500
 Check '...restored after closing the terminal window' (($null -ne (Code $r)) -and (SettingsBack)) "$r lid=$(Setting lid)"
+function TimeToRestore([int]$maxMs = 5000) {
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt $maxMs) { if (SettingsBack) { return $sw.ElapsedMilliseconds }; Start-Sleep -Milliseconds 100 }
+    return -1
+}
 $p = Start-Process -PassThru -WindowStyle Hidden $Exe -ArgumentList '--ignore-lid'
-Start-Sleep 2
+Start-Sleep 3
+Check 'a watcher process is guarding the change' ([bool](Get-CimInstance Win32_Process -Filter "Name='caffeinate-agent.exe'" | Where-Object CommandLine -match '--watch'))
 Stop-Process -Id $p.Id -Force
-Start-Sleep -Milliseconds 500
-Check 'hard kill: the change is left behind (expected)...' ((Setting lid) -eq '0/0')
-Check '...with a repair task registered to undo it' (TaskExists 'repair')
-$o = (& $Exe --restore) -join ' '
-Check '...and --restore puts it back' ((SettingsBack) -and $o -match 'Restored') $o
-Check '...and removes the repair task' (-not (TaskExists 'repair'))
+$ms = TimeToRestore
+Check "...restored right after a hard kill (Stop-Process -Force), in ${ms} ms" ($ms -ge 0 -and $ms -lt 3000) "lid=$(Setting lid) sleep=$(Setting sleep)"
+$p = Start-Process -PassThru -WindowStyle Hidden $Exe -ArgumentList '--ignore-lid'
+Start-Sleep 3
+taskkill /T /F /PID $p.Id 2>&1 | Out-Null
+$ms = TimeToRestore
+Check "...restored right after killing the whole process tree (taskkill /T /F), in ${ms} ms" ($ms -ge 0 -and $ms -lt 3000) "lid=$(Setting lid) sleep=$(Setting sleep)"
+Start-Sleep 2
+Check '...and the watcher and repair task go away once nothing is changed' ((-not (TaskExists 'repair')) -and -not (Get-CimInstance Win32_Process -Filter "Name='caffeinate-agent.exe'" | Where-Object CommandLine -match '--watch'))
 
 Write-Host "`n-- Extended: saved schedules --"
 foreach ($n in 'caff-test-a', 'caff-test-b') { & $Exe --remove $n 2>$null | Out-Null }

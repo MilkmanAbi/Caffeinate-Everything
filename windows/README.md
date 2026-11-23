@@ -99,14 +99,25 @@ prints the plan without doing anything.
 ### Nothing gets left behind
 
 Every power-plan change is recorded in `%LOCALAPPDATA%\Caffeinate\journal.json` with the original
-value and the process that made it. It is put back:
-- on normal exit, Ctrl+C, closing the window, or logoff/shutdown
-- if caffeinate is killed: by a repair task that runs every 5 minutes and at logon while anything is
-  changed, or by `caffeinate --restore`
-- never over a value *you* changed in the meantime
+value and the process that made it. It goes back the moment caffeinate ends, however it ends:
 
-When several caffeinates change the same setting, the last one out restores it. `--status` shows
-everything that's currently changed.
+| How caffeinate ends | What restores it | Measured |
+|---|---|---|
+| Normal exit, Ctrl+C, Ctrl+Break | caffeinate itself | instant |
+| Terminal window or tab closed, logoff, shutdown | caffeinate's close handler, power settings first | instant |
+| Killed (Task Manager, `Stop-Process -Force`, `taskkill /F`) | a watcher that holds a handle to every caffeinate that changed something | ~0.1 s |
+| Whole process tree killed (`taskkill /T /F`, "End process tree") | the same watcher, which Task Scheduler starts so it isn't in caffeinate's tree | ~0.1 s |
+| The watcher was killed as well | a repair task at logon and every 5 minutes, or `caffeinate --restore` | ≤ 5 min |
+
+A value *you* changed in the meantime is never overwritten. When several caffeinates change the same
+setting, the last one out restores it.
+
+Windows Update (`--hold-updates`) works the same way. The elevated helper re-launches itself
+detached, so it survives a process-tree kill, and it lifts the pause the moment caffeinate's process
+ends: measured at 2–13 ms for a kill, a tree kill and a window close. If even the helper is killed,
+the pause runs out by itself within 15 minutes, because the helper renews it in 15-minute leases.
+
+`--status` shows everything that's currently changed.
 
 ## Windows caveats
 

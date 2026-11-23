@@ -336,7 +336,13 @@ internal static class Session
     public static void Cleanup()
     {
         if (Interlocked.Exchange(ref _cleanedUp, 1) == 1) return;
-        for (int i = Cleanups.Count - 1; i >= 0; i--)
+        // Cleanups[0] is the power-plan restore: do it first, before anything that could take time.
+        // The rest run newest-first.
+        if (Cleanups.Count > 0)
+        {
+            try { Cleanups[0](); } catch (Exception e) { Log.Write($"cleanup step failed: {e.Message}"); }
+        }
+        for (int i = Cleanups.Count - 1; i >= 1; i--)
         {
             try { Cleanups[i](); }
             catch (Exception e) { Log.Write($"cleanup step failed: {e.Message}"); }

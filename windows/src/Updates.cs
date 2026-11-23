@@ -82,32 +82,38 @@ internal static class Updates
         string id = Guid.NewGuid().ToString("N");
         var ready = new EventWaitHandle(false, EventResetMode.ManualReset, $@"Local\Caffeinate.UpdReady.{id}");
         var stop = new EventWaitHandle(false, EventResetMode.ManualReset, $@"Local\Caffeinate.UpdStop.{id}");
+        var done = new EventWaitHandle(false, EventResetMode.ManualReset, $@"Local\Caffeinate.UpdDone.{id}");
         string end = endLocal is DateTime e ? Clock.ToUtc(e).ToString(Fmt, CultureInfo.InvariantCulture) : "none";
         Session.Info("asking for admin rights to pause Windows Update...");
         var helper = Elevation.Start(["updates", "hold", Owner.Me.Pid.ToString(CultureInfo.InvariantCulture),
             Owner.Me.Started.ToString(CultureInfo.InvariantCulture), end, id]);
+        // The elevated helper hands off to a detached copy of itself and exits, so success = "ready" is set;
+        // helper exit without "ready" = failure. (WaitAny reports the lowest signalled index, so ready wins.)
         using var exited = new ManualResetEvent(false) { SafeWaitHandle = new SafeWaitHandle(helper.Handle, false) };
-        if (WaitHandle.WaitAny([ready, exited], TimeSpan.FromSeconds(60)) != 0)
+        int which = WaitHandle.WaitAny([ready, exited], TimeSpan.FromSeconds(90));
+        if (which != 0 && !ready.WaitOne(0))
         {
+            string why = which == WaitHandle.WaitTimeout ? "timed out" : helper.Error();
             helper.Dispose();
-            throw new InvalidOperationException("the Windows Update helper failed: " + helper.Error());
+            throw new InvalidOperationException("the Windows Update helper failed: " + why);
         }
         var until = PausedUntilUtc();
         Session.Info(until is DateTime u
             ? $"Windows Update paused until {TimeSpec.Format(Clock.ToLocal(u), Clock.Now)} (lifted when caffeinate exits)"
             : "Windows Update pause requested");
-        return new HoldHandle(stop, ready, helper);
+        return new HoldHandle(stop, ready, done, helper);
     }
 
-    private sealed class HoldHandle(EventWaitHandle stop, EventWaitHandle ready, Elevation.Helper helper) : IDisposable
+    private sealed class HoldHandle(EventWaitHandle stop, EventWaitHandle ready, EventWaitHandle done, Elevation.Helper helper) : IDisposable
     {
         public void Dispose()
         {
             stop.Set();
-            helper.WaitForExit(TimeSpan.FromSeconds(10)); // let it restore before we go
+            done.WaitOne(TimeSpan.FromSeconds(2)); // it restores in milliseconds; it also does so if we die
             helper.Dispose();
             stop.Dispose();
             ready.Dispose();
+            done.Dispose();
         }
     }
 
@@ -128,11 +134,30 @@ internal static class Updates
                 Log.Write("resumed Windows Update");
                 return 0;
             case "hold":
+                return Detach(args);
+            case "hold-detached":
                 return Hold(int.Parse(args[1], CultureInfo.InvariantCulture), long.Parse(args[2], CultureInfo.InvariantCulture),
                     args[3], args[4]);
             default:
                 throw new InvalidOperationException("unknown updates operation");
         }
+    }
+
+    /// Re-launch as "hold-detached" and exit once it is ready. The detached copy's parent (this process) is
+    /// gone, so "End process tree" on caffeinate doesn't kill it: it still sees caffeinate exit and restores.
+    private static int Detach(string[] args)
+    {
+        string id = args[4];
+        using var ready = EventWaitHandle.OpenExisting($@"Local\Caffeinate.UpdReady.{id}");
+        var psi = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+        };
+        foreach (var a in new[] { "--elevated", "updates", "hold-detached" }.Concat(args[1..])) psi.ArgumentList.Add(a);
+        using var child = System.Diagnostics.Process.Start(psi)!;
+        using var childExit = new ManualResetEvent(false) { SafeWaitHandle = new SafeWaitHandle(child.Handle, false) };
+        int which = WaitHandle.WaitAny([ready, childExit], TimeSpan.FromSeconds(60));
+        return which == 0 ? 0 : 2;
     }
 
     private static int Hold(int ownerPid, long ownerStarted, string endArg, string id)
@@ -142,12 +167,18 @@ internal static class Updates
         if (owner.IsInvalid) return 3;
         using var ready = EventWaitHandle.OpenExisting($@"Local\Caffeinate.UpdReady.{id}");
         using var stop = EventWaitHandle.OpenExisting($@"Local\Caffeinate.UpdStop.{id}");
+        using var done = EventWaitHandle.OpenExisting($@"Local\Caffeinate.UpdDone.{id}");
         using var ownerWait = new ManualResetEvent(false) { SafeWaitHandle = owner };
 
         DateTime? end = endArg == "none" ? null
             : DateTime.Parse(endArg, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
-        // A lease: if both caffeinate and this helper are killed, the pause still lapses on its own.
-        DateTime Lease() => end is DateTime e ? e.AddMinutes(30) : DateTime.UtcNow.AddHours(12);
+        // A short lease, renewed every 5 minutes: if caffeinate and this helper are both killed, the pause
+        // still lapses on its own within 15 minutes.
+        DateTime Lease()
+        {
+            var lease = DateTime.UtcNow.AddMinutes(15);
+            return end is DateTime e && e.AddMinutes(5) < lease ? e.AddMinutes(5) : lease;
+        }
 
         var prior = Snapshot();
         DateTime start = DateTime.UtcNow;
@@ -162,9 +193,9 @@ internal static class Updates
         else Log.Write($"session hold: Windows Update already paused until {priorEnd:o}; leaving it");
         ready.Set();
 
-        while (WaitHandle.WaitAny([ownerWait, stop], TimeSpan.FromHours(1)) == WaitHandle.WaitTimeout)
+        while (WaitHandle.WaitAny([ownerWait, stop], TimeSpan.FromMinutes(5)) == WaitHandle.WaitTimeout)
         {
-            if (written is not null && end is null && Read(Expiry) == written)
+            if (written is not null && Read(Expiry) == written)
             {
                 Write(start, Lease());   // renew the lease while the session lasts
                 written = Read(Expiry);
@@ -182,6 +213,7 @@ internal static class Updates
             }
             Log.Write("session hold: restored the previous Windows Update pause state");
         }
+        done.Set();
         return 0;
     }
 

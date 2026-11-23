@@ -110,7 +110,7 @@ internal static class Cli
             switch (args[0])
             {
                 case "--run-schedule": o.Command = Command.RunSchedule; o.Internal = args[1..]; return o;
-                case "--repair": o.Command = Command.Repair; return o;
+                case "--repair": o.Command = Command.Repair; o.Internal = args[1..]; return o;
                 case "--elevated": o.Command = Command.Elevated; o.Internal = args[1..]; return o;
             }
         }

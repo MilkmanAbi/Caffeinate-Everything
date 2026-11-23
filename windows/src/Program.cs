@@ -36,7 +36,7 @@ internal static class Program
                 case Command.Restore: return Restore();
                 case Command.Schedule: return Schedules.Create(o);
                 case Command.RunSchedule: return Background(() => Schedules.RunScheduled(o.Internal.FirstOrDefault() ?? ""));
-                case Command.Repair: return Background(RepairNow);
+                case Command.Repair: return Background(o.Internal.Contains("--watch") ? Watch : RepairNow);
                 case Command.Elevated: return Elevation.RunElevated(o.Internal);
                 default: return Session.Run(o);
             }
@@ -76,6 +76,51 @@ internal static class Program
         if (restored.Count > 0) Log.Write($"repair task restored: {string.Join(", ", restored)}");
         if (!File.Exists(State.FilePath("journal.json"))) RepairTask.Remove();
         return 0;
+    }
+
+    /// Restore each journaled setting the moment its owning process exits (see RepairTask).
+    private static int Watch()
+    {
+        using var changed = new EventWaitHandle(false, EventResetMode.AutoReset, RepairTask.ChangedEvent);
+        while (true)
+        {
+            var mutex = new Mutex(false, RepairTask.WatcherMutex);
+            bool owned;
+            try { owned = mutex.WaitOne(0); } catch (AbandonedMutexException) { owned = true; }
+            if (!owned) { mutex.Dispose(); return 0; }   // another watcher is on it
+            try
+            {
+                Log.Write("watcher started");
+                while (true)
+                {
+                    var restored = Journal.Repair();
+                    if (restored.Count > 0) Log.Write($"watcher restored: {string.Join(", ", restored)}");
+                    var owners = Journal.Entries().SelectMany(e => e.Owners)
+                        .GroupBy(o => (o.Pid, o.Started)).Select(g => g.First()).Take(62).ToList();
+                    if (owners.Count == 0) break;
+                    var handles = new List<WaitHandle> { changed };
+                    var raw = new List<Microsoft.Win32.SafeHandles.SafeWaitHandle>();
+                    foreach (var o in owners)
+                    {
+                        var h = Native.OpenProcess(Native.SYNCHRONIZE, false, (uint)o.Pid);
+                        if (h.IsInvalid) { h.Dispose(); continue; }
+                        raw.Add(h);
+                        handles.Add(new ManualResetEvent(false) { SafeWaitHandle = h });
+                    }
+                    if (handles.Count == 1) { Thread.Sleep(500); continue; }   // owners vanished between calls
+                    WaitHandle.WaitAny(handles.ToArray(), TimeSpan.FromMinutes(1));
+                    foreach (var h in handles.Skip(1)) h.Dispose();
+                }
+            }
+            finally
+            {
+                mutex.ReleaseMutex();
+                mutex.Dispose();
+            }
+            // A session may have journaled something after our last look but before we let go of the
+            // mutex (so its Ensure() didn't start a new watcher): check once more after releasing.
+            if (!File.Exists(State.FilePath("journal.json"))) { Log.Write("watcher done"); return 0; }
+        }
     }
 
     /// Scheduled-task entry points: no console, so log failures instead of printing them.

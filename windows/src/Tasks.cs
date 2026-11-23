@@ -48,7 +48,8 @@ internal static class Tasks
 
     public static string Local(DateTime t) => t.ToString("yyyy-MM-dd'T'HH:mm:ss");
 
-    public static string Xml(string description, IEnumerable<string> triggers, string arguments, bool wakeToRun) => $"""
+    public static string Xml(string description, IEnumerable<string> triggers, string arguments, bool wakeToRun,
+        string instances = "Parallel") => $"""
         <?xml version="1.0" encoding="UTF-16"?>
         <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
           <RegistrationInfo><Description>{Esc(description)}</Description></RegistrationInfo>
@@ -59,7 +60,7 @@ internal static class Tasks
             <Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal>
           </Principals>
           <Settings>
-            <MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>
+            <MultipleInstancesPolicy>{instances}</MultipleInstancesPolicy>
             <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
             <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
             <AllowHardTerminate>true</AllowHardTerminate>
@@ -150,24 +151,37 @@ internal static class Agent
     }
 }
 
-/// Runs `caffeinate --repair` at logon and every few minutes while any setting is journaled, so a
-/// killed caffeinate can't leave e.g. "lid close: do nothing" behind.
+/// While any setting is journaled, a watcher (`caffeinate --repair --watch`) holds a handle to every
+/// owning process and restores the setting the moment its owner exits, even if it was killed outright.
+/// It is started through Task Scheduler rather than as a child, so "End process tree" on caffeinate
+/// can't take it down too. The same task also fires at logon and every 5 minutes as a fallback.
 internal static class RepairTask
 {
     private const string Name = "repair";
+    public const string WatcherMutex = @"Local\Caffeinate.Watcher";
+    public const string ChangedEvent = @"Local\Caffeinate.JournalChanged";
     private static bool? _present;
 
     public static void Ensure()
     {
-        if (_present == true) return;
         try
         {
-            if (!Tasks.Exists(Name))
-                Tasks.Register(Name, Tasks.Xml("Restores power settings left changed by a caffeinate that was killed.",
-                    [Tasks.LogonTrigger(), Tasks.RepeatingTrigger(TimeSpan.FromMinutes(5))], "--repair", false));
-            _present = true;
+            if (_present != true)
+            {
+                // Re-register if missing or from an older version (which had no watcher).
+                var (code, xml) = Tasks.SchTasks("/query", "/tn", Tasks.Folder + Name, "/xml");
+                if (code != 0 || !xml.Contains("--watch", StringComparison.Ordinal))
+                    Tasks.Register(Name, Tasks.Xml("Restores power settings changed by caffeinate as soon as its process ends.",
+                        [Tasks.LogonTrigger(), Tasks.RepeatingTrigger(TimeSpan.FromMinutes(5))], "--repair --watch", false,
+                        instances: "IgnoreNew"));
+                _present = true;
+            }
+            // Tell a running watcher about new owners, or start one.
+            if (EventWaitHandle.TryOpenExisting(ChangedEvent, out var ev)) using (ev) ev.Set();
+            if (Mutex.TryOpenExisting(WatcherMutex, out var m)) m.Dispose();
+            else Tasks.SchTasks("/run", "/tn", Tasks.Folder + Name);
         }
-        catch (Exception e) { Log.Write($"could not register repair task: {e.Message}"); }
+        catch (Exception e) { Log.Write($"could not start the repair watcher: {e.Message}"); }
     }
 
     public static void Remove()
