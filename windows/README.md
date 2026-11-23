@@ -94,7 +94,7 @@ prints the plan without doing anything.
 | Saved schedules | Per-user Task Scheduler tasks in `\Caffeinate\` (no admin), run by a windowless copy of caffeinate. They catch up after missed runs and re-enter a wake window after restart, sign-in or unlock. | Survives closing the terminal, restarts and sleep. |
 | Wake events | Holds the display and system on for 2 minutes after a timer wake. Turns on "Allow wake timers" while a wake schedule exists, and puts it back afterwards. | Windows sends a PC back to sleep ~2 minutes after an unattended timer wake. |
 | Scheduled sleeps | Wait until there has been 2 minutes with no input (up to 15 minutes), and skip if another caffeinate is holding or the event is more than 10 minutes late. | A schedule shouldn't put the PC to sleep while you're using it. |
-| Windows Update | The same registry values the Settings app writes, set by a short-lived elevated helper. `--hold-updates` restores the previous state the moment caffeinate exits, never shortens a pause you set, and expires on its own if everything is killed. | One UAC prompt; everything else stays unprivileged. |
+| Windows Update | The same registry values the Settings app writes, set by a short-lived elevated helper. Verified on Windows 11 build 28000: Settings then shows "Updates paused until...". `--hold-updates` restores the previous state the moment caffeinate exits, never shortens a pause you set, and expires on its own if everything is killed. | One UAC prompt; everything else stays unprivileged. |
 
 ### Nothing gets left behind
 
