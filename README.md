@@ -22,9 +22,13 @@ usage: caffeinate [-dimsu] [-t timeout] [-w pid] [utility arguments...]
 
 | Platform | Status | Directory |
 |----------|--------|-----------|
-| Windows  | ✅ Available | [`windows/`](windows/) |
+| Windows  | ✅ Available, with installers. Extras: sleep/wake schedules, screen-off, lid, Windows Update pause | [`windows/`](windows/) |
 | Linux    | Planned | |
 | macOS    | Built in (`/usr/bin/caffeinate`) | |
 
 Each platform's directory has its own build instructions and notes on how each flag maps to
 that OS.
+
+**Windows:** grab the installer from the
+[latest release](https://github.com/MilkmanAbi/Caffeinate-Everything/releases/latest). `caffeinate --help`
+shows the macOS usage line, with the Windows-only extended options below it.

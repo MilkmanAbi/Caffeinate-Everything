@@ -168,11 +168,36 @@ None of the tests sleep the PC or turn the screen off.
 Run it elevated to also check `powercfg /requests`, including that the requests are released when
 the process is killed.
 
-## Build / install
+## Install
 
-Requirements: the .NET 10 SDK and the Visual Studio "Desktop development with C++" workload (needed for Native AOT).
+Download the installer for your PC from the
+[latest release](https://github.com/MilkmanAbi/Caffeinate-Everything/releases/latest):
+
+| File | For |
+|------|-----|
+| `caffeinate-<version>-windows-x64-setup.exe` | Most Windows PCs (Intel / AMD) |
+| `caffeinate-<version>-windows-arm64-setup.exe` | Windows on ARM (Snapdragon, Surface Pro X...) |
+
+- By default it installs just for you, with no admin rights: `%LOCALAPPDATA%\Programs\caffeinate`,
+  added to your PATH. Choose "all users" on the first page to install to Program Files instead.
+- Open a **new** terminal afterwards so it picks up the PATH change.
+- The uninstaller removes your saved schedules and their tasks, restores anything caffeinate
+  changed, and deletes `%LOCALAPPDATA%\Caffeinate`.
+- Silent install: `setup.exe /VERYSILENT /CURRENTUSER`, or `/ALLUSERS` for all users.
+
+There are also standalone `caffeinate-windows-<arch>.exe` files if you'd rather put the exe on your
+PATH yourself. The binaries are not code-signed, so Windows may ask before running them the first
+time.
+
+## Build
+
+Requirements:
+- the .NET 10 SDK
+- the Visual Studio "Desktop development with C++" workload (needed for Native AOT)
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php), only for building installers
 
 ```powershell
-.\build.ps1 -Install          # builds and copies caffeinate.exe to ~\.local\bin
-.\build.ps1 -Rid win-x64      # cross-build for x64
+.\build.ps1                          # publish\<rid>\caffeinate.exe for this PC
+.\build.ps1 -Rid win-x64 -Installer  # x64 exe + publish\installers\caffeinate-<ver>-windows-x64-setup.exe
+.\build.ps1 -Install                 # also copy caffeinate.exe to ~\.local\bin
 ```
